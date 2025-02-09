@@ -1,0 +1,17 @@
+anthropic>=0.45.2
+hyperopt>=0.2.7
+lightgbm>=4.5.0
+numpy==1.26.4
+openai>=1.61.1
+pandas>=2.2.3
+plotly>=6.0.0
+prophet>=1.1.6
+scikit-learn>=1.6.1
+scipy>=1.15.1
+seaborn>=0.13.2
+statsmodels>=0.14.4
+streamlit>=1.42.0
+trafilatura>=2.0.0
+twilio>=9.4.4
+xgboost>=2.1.4
+pmdarima==2.0.4
