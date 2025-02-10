@@ -25,6 +25,9 @@ def main():
             df = load_and_preprocess_data(uploaded_file)
 
             if df is not None:
+                # Store processed data in session state
+                st.session_state["processed_data"] = df.copy()
+
                 # Navigation
                 analysis_type = st.sidebar.selectbox(
                     "Select Analysis Type",
@@ -118,9 +121,12 @@ def main():
                 elif analysis_type == "ML Time Series":
                     date_col = st.selectbox("Select Date Column", df.columns)
                     # Exclude the selected date column from the target variable options
-                    target_col = st.selectbox("Select Target Variable", [col for col in df.columns if col != date_col])
+                    target_col = st.selectbox("Select Target Variable", 
+                                                [col for col in df.columns if col != date_col])
+                    # Store target column in session state
+                    st.session_state["target_col"] = target_col
                     feature_cols = st.multiselect("Select Feature Columns", 
-                                                  [col for col in df.columns if col not in [date_col, target_col]])
+                                                   [col for col in df.columns if col not in [date_col, target_col]])
                     model_type = st.selectbox("Select Model Type", 
                                               ["RandomForest", "XGBoost"])
                     n_folds = st.slider("Number of Cross-validation Folds", 

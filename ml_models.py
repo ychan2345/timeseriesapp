@@ -41,31 +41,17 @@ def create_model(model_class, params):
 def objective(params, model_class, X, y, cv_splits):
     """Objective function for hyperopt optimization."""
     model = create_model(model_class, params)
-
-    # Use k-fold cross validation
-    kf = KFold(n_splits=cv_splits, shuffle=True, random_state=42)
+    kf = KFold(n_splits=cv_splits, shuffle=False)  # No shuffle for time series
     scores = cross_val_score(model, X, y, cv=kf, scoring='neg_mean_squared_error')
-
-    # Return the negative mean squared error (hyperopt minimizes)
     return {'loss': -scores.mean(), 'status': STATUS_OK}
-
-def calculate_prediction_intervals(y_test, predictions, confidence=0.95):
-    """Calculate prediction intervals using residuals."""
-    residuals = y_test - predictions
-    std_residuals = np.std(residuals)
-    z_score = 1.96  # for 95% confidence interval
-
-    confidence_interval = z_score * std_residuals
-    lower_bound = predictions - confidence_interval
-    upper_bound = predictions + confidence_interval
-
-    return lower_bound, upper_bound
 
 def run_ml_model(df, date_col, target_col, feature_cols, model_type, n_folds=5):
     """Run machine learning time series analysis with hyperparameter optimization."""
     try:
-        # Store original dates for plotting
+        # Store original dates for plotting and metadata
         dates = df[date_col].copy()
+        training_period_start = dates.min()
+        training_period_end = dates.max()
 
         # Create time features from date column
         df = create_time_features(df, date_col)
@@ -74,20 +60,20 @@ def run_ml_model(df, date_col, target_col, feature_cols, model_type, n_folds=5):
         time_features = ['year', 'month', 'day', 'dayofweek', 'quarter']
         all_features = feature_cols + time_features
 
-        # Prepare data - exclude the original date column from features
-        X = df[all_features].copy()  # Only use processed features
+        # Prepare data
+        X = df[all_features].copy()
         y = df[target_col].copy()
+
+        # Train-test split (preserving time order)
+        train_size = int(len(df) * 0.8)
+        X_train, X_test = X[:train_size], X[train_size:]
+        y_train, y_test = y[:train_size], y[train_size:]
+        dates_train, dates_test = dates[:train_size], dates[train_size:]
 
         # Get model class and hyperparameter space
         model_class, space = get_model_and_space(model_type)
 
-        # Train-test split (before hyperparameter optimization)
-        train_size = int(len(df) * 0.8)
-        X_train, X_test = X[:train_size], X[train_size:]
-        y_train, y_test = y[:train_size], y[train_size:]
-        dates_test = dates[train_size:]  # Keep dates aligned with test set
-
-        # Run hyperparameter optimization on training data only
+        # Run hyperparameter optimization on training data
         with st.spinner('Optimizing hyperparameters...'):
             trials = Trials()
             best = fmin(
@@ -99,28 +85,26 @@ def run_ml_model(df, date_col, target_col, feature_cols, model_type, n_folds=5):
                 rstate=np.random.default_rng(42)
             )
 
-        # Create model with best parameters
+        # Create and train model with best parameters
         best_model = create_model(model_class, best)
 
-        # Train on full training set
+        # Train on training set
         best_model.fit(X_train, y_train)
 
-        # Generate predictions for both training and test sets
+        # Generate predictions for both sets
         train_predictions = best_model.predict(X_train)
         test_predictions = best_model.predict(X_test)
 
-        # Calculate metrics for training set
+        # Calculate metrics for both sets
         train_metrics = calculate_metrics(y_train, train_predictions)
-
-        # Calculate metrics for test set
         test_metrics = calculate_metrics(y_test, test_predictions)
 
-        # Cross-validation scores
-        kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
-        cv_scores = cross_val_score(best_model, X_train, y_train, cv=kf, scoring='r2')
-
-        # Calculate confidence intervals
-        lower_bound, upper_bound = calculate_prediction_intervals(y_test, test_predictions)
+        # Combine metrics with appropriate suffixes
+        metrics = {}
+        for key, value in train_metrics.items():
+            metrics[f'{key}_Train'] = value
+        for key, value in test_metrics.items():
+            metrics[f'{key}_Test'] = value
 
         # Calculate feature importance
         feature_importance = (
@@ -128,56 +112,46 @@ def run_ml_model(df, date_col, target_col, feature_cols, model_type, n_folds=5):
             else np.zeros(len(all_features))
         )
 
-        # Add suffixes to metrics
-        metrics = {}
-        for key, value in train_metrics.items():
-            metrics[f'{key}_Train'] = value
-        for key, value in test_metrics.items():
-            metrics[f'{key}_Test'] = value
-        metrics['CV_R2_Mean'] = cv_scores.mean()
-        metrics['CV_R2_Std'] = cv_scores.std()
-
-        # Create prediction plot with confidence intervals
+        # Create prediction plot
         fig_pred = go.Figure()
 
-        # Add actual values
+        # Add training data
         fig_pred.add_trace(go.Scatter(
-            x=dates_test,
-            y=y_test,
-            name='Actual Values',
+            x=dates_train,
+            y=y_train,
+            name='Training Actual',
             mode='lines',
             line=dict(color='blue')
         ))
+        fig_pred.add_trace(go.Scatter(
+            x=dates_train,
+            y=train_predictions,
+            name='Training Predictions',
+            mode='lines',
+            line=dict(color='lightblue')
+        ))
 
-        # Add predictions
+        # Add test data
         fig_pred.add_trace(go.Scatter(
             x=dates_test,
-            y=test_predictions,
-            name='Predictions',
+            y=y_test,
+            name='Test Actual',
             mode='lines',
             line=dict(color='red')
         ))
-
-        # Add confidence intervals
         fig_pred.add_trace(go.Scatter(
-            x=pd.concat([dates_test, dates_test[::-1]]),
-            y=np.concatenate([upper_bound, lower_bound[::-1]]),
-            fill='toself',
-            fillcolor='rgba(0,100,80,0.2)',
-            line=dict(color='rgba(255,255,255,0)'),
-            name='95% Confidence Interval',
-            showlegend=True
+            x=dates_test,
+            y=test_predictions,
+            name='Test Predictions',
+            mode='lines',
+            line=dict(color='orange')
         ))
 
         fig_pred.update_layout(
             title=f'{model_type} Predictions vs Actual Values',
             xaxis_title='Date',
             yaxis_title=target_col,
-            showlegend=True,
-            xaxis=dict(
-                rangeslider=dict(visible=True),
-                type='date'
-            )
+            showlegend=True
         )
 
         # Create feature importance plot
@@ -194,13 +168,16 @@ def run_ml_model(df, date_col, target_col, feature_cols, model_type, n_folds=5):
             yaxis_title='Importance Score'
         )
 
-        # Store results for LLM interpretation
+        # Store results with additional metadata
         st.session_state.model_results = {
             "model_type": f"ML_{model_type}",
             "metrics": metrics,
             "predictions": test_predictions.tolist(),
             "actual_values": y_test.tolist(),
-            "feature_importance": dict(zip(all_features, feature_importance.tolist()))
+            "feature_importance": dict(zip(all_features, feature_importance.tolist())),
+            "training_period_start": training_period_start.strftime("%Y-%m-%d"),
+            "training_period_end": training_period_end.strftime("%Y-%m-%d"),
+            "model_object": best_model
         }
 
         return {

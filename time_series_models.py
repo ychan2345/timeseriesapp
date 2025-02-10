@@ -184,6 +184,10 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
         # Sort data by date
         df = df.sort_values(date_col)
 
+        # Store training period information
+        training_period_start = df[date_col].min()
+        training_period_end = df[date_col].max()
+
         # Reserve last 20% of data for final testing
         test_size = int(len(df) * 0.2)
         train_full = df[:-test_size]
@@ -235,9 +239,9 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
 
         elif model_type == "Prophet":
             # For Prophet, we continue to use a grid search approach
-            candidate_params = [{'changepoint_prior_scale': cps, 'seasonality_mode': sm} 
-                                for cps in [0.001, 0.01, 0.1, 0.5] 
-                                for sm in ['additive','multiplicative']]
+            candidate_params = [{'changepoint_prior_scale': cps, 'seasonality_mode': sm}
+                                for cps in [0.001, 0.01, 0.1, 0.5]
+                                for sm in ['additive', 'multiplicative']]
             best_params_prophet = None
             best_score = np.inf
             for params in candidate_params:
@@ -304,7 +308,7 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
                 predictions = None
 
                 if model_type == "ARIMA":
-                    order = best_params.get('order', (1,1,1))
+                    order = best_params.get('order', (1, 1, 1))
                     try:
                         if feature_cols is not None and len(feature_cols) > 0:
                             model = SARIMAX(train_data[target_col],
@@ -324,8 +328,8 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
                         continue
 
                 elif model_type == "SARIMA":
-                    order = best_params.get('order', (1,1,1))
-                    seasonal_order = best_params.get('seasonal_order', (1,1,1,12))
+                    order = best_params.get('order', (1, 1, 1))
+                    seasonal_order = best_params.get('seasonal_order', (1, 1, 1, 12))
                     try:
                         if feature_cols is not None and len(feature_cols) > 0:
                             model = SARIMAX(train_data[target_col],
@@ -401,7 +405,7 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
         # Fallback: if no valid CV scores were collected, use final training metrics as CV scores.
         if not cv_scores:
             st.warning("No valid cross-validation scores were calculated. Falling back to final training metrics.")
-            fallback_model = ARIMA(train_full[target_col], order=best_params.get('order', (1,1,1))).fit()
+            fallback_model = ARIMA(train_full[target_col], order=best_params.get('order', (1, 1, 1))).fit()
             cv_scores = [calculate_metrics(train_full[target_col], fallback_model.fittedvalues)]
 
         # Train final model on all training data using tuned hyperparameters and get predictions
@@ -442,24 +446,24 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
         else:  # ARIMA or SARIMA
             if feature_cols is not None and len(feature_cols) > 0:
                 if model_type == "ARIMA":
-                    order = best_params.get('order', (1,1,1))
+                    order = best_params.get('order', (1, 1, 1))
                     model = SARIMAX(train_full[target_col],
                                     exog=train_full[feature_cols],
                                     order=order)
                 else:  # SARIMA
-                    order = best_params.get('order', (1,1,1))
-                    seasonal_order = best_params.get('seasonal_order', (1,1,1,12))
+                    order = best_params.get('order', (1, 1, 1))
+                    seasonal_order = best_params.get('seasonal_order', (1, 1, 1, 12))
                     model = SARIMAX(train_full[target_col],
                                     exog=train_full[feature_cols],
                                     order=order,
                                     seasonal_order=seasonal_order)
             else:
                 if model_type == "ARIMA":
-                    order = best_params.get('order', (1,1,1))
+                    order = best_params.get('order', (1, 1, 1))
                     model = ARIMA(train_full[target_col], order=order)
                 else:  # SARIMA
-                    order = best_params.get('order', (1,1,1))
-                    seasonal_order = best_params.get('seasonal_order', (1,1,1,12))
+                    order = best_params.get('order', (1, 1, 1))
+                    seasonal_order = best_params.get('seasonal_order', (1, 1, 1, 12))
                     model = SARIMAX(train_full[target_col],
                                     order=order,
                                     seasonal_order=seasonal_order)
@@ -597,7 +601,10 @@ def run_time_series_model(df, date_col, target_col, feature_cols, model_type, n_
             "metrics": cv_metrics,
             "predictions": final_predictions.tolist(),
             "actual_values": final_actuals.tolist(),
-            "feature_importance": importance_scores if (feature_cols is not None and len(feature_cols) > 0) else {}
+            "feature_importance": importance_scores if (feature_cols is not None and len(feature_cols) > 0) else {},
+            "training_period_start": training_period_start.strftime("%Y-%m-%d"),
+            "training_period_end": training_period_end.strftime("%Y-%m-%d"),
+            "model_object": prophet_model if model_type == "Prophet" else fitted_model
         }
 
         return {
